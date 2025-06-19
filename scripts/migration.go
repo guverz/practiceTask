@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 )
 
 func main() {
@@ -35,7 +37,7 @@ func main() {
 		os.Exit(0)
 	default:
 		fmt.Println("wrong Flag")
-		os.Exit(1)
+		// os.Exit(1)
 	}
 
 	args := flag.Args()
@@ -50,9 +52,6 @@ func main() {
 	case "check":
 		check()
 		os.Exit(0)
-	default:
-		fmt.Println("wrong Argument")
-		os.Exit(1)
 	}
 }
 
@@ -82,7 +81,30 @@ func noColor() {
 	fmt.Println("no-color")
 }
 
+func describe(arg string) (string, error) {
+	cmd := exec.Command("scripts/describe.sh", arg)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to run describe %s: %v", arg, err)
+	}
+	return string(output), nil
+	// should check whether describe works
+}
+
 func add() {
+	project, err := describe("project")
+	if err != nil {
+		log.Fatal(err)
+	}
+	version, err := describe("version")
+	if err != nil {
+		log.Fatal(err)
+	}
+	release, err := describe("release")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(project, version, release)
 	fmt.Println("add")
 }
 
