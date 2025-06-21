@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 func main() {
@@ -35,8 +36,8 @@ func main() {
 	case versionFlag:
 		version()
 		os.Exit(0)
-	default:
-		fmt.Println("wrong Flag")
+		// default:
+		// 	fmt.Println("wrong Flag")
 		// os.Exit(1)
 	}
 
@@ -87,7 +88,7 @@ func describe(arg string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to run describe %s: %v", arg, err)
 	}
-	return string(output), nil
+	return strings.ReplaceAll(string(output), "\n", ""), nil
 	// should check whether describe works
 }
 
@@ -104,8 +105,11 @@ func add() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// project = strings.TrimSpace(project) // убирает пробелы и \n в начале и конце
+	// version = strings.ReplaceAll(version, "\n", "")
+	// release = strings.ReplaceAll(release, "\n", "")
+
 	baseName := fmt.Sprintf("%s-%s-%s", project, version, release)
-	fmt.Println(project, version, release)
 	fmt.Printf("Add migration script %s\n", baseName)
 
 }
