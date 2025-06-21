@@ -139,8 +139,8 @@ function version {
 }
 
 function project {
-   #git remote -v | grep fetch | awk '{print $2}' | awk -F ':' '{print $2}' | sed 's/\//\-/g' | sed 's/.git//'
-   echo ClearingManager-mts
+   git remote -v | grep fetch | awk '{print $2}' | awk -F ':' '{print $2}' | sed 's/\//\-/g' | sed 's/.git//'
+#    echo ClearingManager-mts
 }
 
 function release {

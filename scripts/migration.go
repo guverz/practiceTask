@@ -104,8 +104,10 @@ func add() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	baseName := fmt.Sprintf("%s-%s-%s", project, version, release)
 	fmt.Println(project, version, release)
-	fmt.Println("add")
+	fmt.Printf("Add migration script %s\n", baseName)
+
 }
 
 func collect() {
