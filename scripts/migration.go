@@ -119,6 +119,7 @@ func noColor() {
 }
 
 func describe(arg string) (string, error) {
+	// should rewrite it to work on both windows and linux
 	cmd := exec.Command("scripts/describe.sh", arg)
 	output, err := cmd.Output()
 	if err != nil {
@@ -193,6 +194,7 @@ func FindLastMigrationNumber(dir, baseName string) (int, error) {
 }
 
 func CreateMigrationFiles(dir, baseName string, includeHelp bool) error {
+	// doesn't work check if there is a MigrationDir, have to create it myself
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
