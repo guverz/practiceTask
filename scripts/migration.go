@@ -6,10 +6,46 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
+const (
+	MiniHelp = `################################################################################
+## !!! Don't forget connect to database source, uncomment:
+#connect source
+## Source may be a source name from configuration file
+## Or it a connect string in format:
+#connect Driver://user:password@host[:port]/dbname
+################################################################################
+## Requests must be separated by ';' delimeter
+#select sysdate from dual;
+################################################################################
+## Use '/' for delimeter PL/SQL code, begin end or create functions, procedures,
+## Packages and any other object that contain PL/SQL code, exmaple
+#begin
+#   -- any pl/sql code
+#end;
+#/
+################################################################################
+## Script could include another file with sql:
+#@include.sql
+## !!! Avoid include migration scripts
+################################################################################
+## To continue or break on specific errors use:
+#whenever error [pattern] continue|break
+################################################################################
+## Additional help
+## roam-sql -h|--help for command line options
+## roam-sql -i|--info for syntax help`
+	MigrationDir = "./migrations"
+	IncludeHelp  = true
+)
+
 func main() {
+
 	var (
 		helpFlag bool
 		// verboseFlag bool
@@ -92,7 +128,7 @@ func describe(arg string) (string, error) {
 	// should check whether describe works
 }
 
-func add() {
+func add() error {
 	project, err := describe("project")
 	if err != nil {
 		log.Fatal(err)
@@ -105,13 +141,79 @@ func add() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// project = strings.TrimSpace(project) // убирает пробелы и \n в начале и конце
-	// version = strings.ReplaceAll(version, "\n", "")
-	// release = strings.ReplaceAll(release, "\n", "")
 
 	baseName := fmt.Sprintf("%s-%s-%s", project, version, release)
 	fmt.Printf("Add migration script %s\n", baseName)
 
+	increment, err := FindLastMigrationNumber(MigrationDir, baseName)
+	if err != nil {
+		return fmt.Errorf("failed to find last migration: %v", err)
+	}
+	increment++
+
+	migrationFile := fmt.Sprintf("%s-%d", baseName, increment)
+	err = CreateMigrationFiles(MigrationDir, migrationFile, IncludeHelp)
+	if err != nil {
+		return fmt.Errorf("failed to create migration files: %v", err)
+	}
+
+	fmt.Printf("Created migration files:\n   %s/%s.up.sql\n   %s/%s.down.sql\n",
+		MigrationDir, migrationFile, MigrationDir, migrationFile)
+
+	return nil
+}
+
+func FindLastMigrationNumber(dir, baseName string) (int, error) {
+	pattern := regexp.MustCompile(fmt.Sprintf(`^%s-(\d+)\.(up|down)\.sql$`, regexp.QuoteMeta(baseName)))
+	var maxNum int
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read directory %s: %v", dir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		matches := pattern.FindStringSubmatch(entry.Name())
+		if len(matches) > 1 {
+			num, err := strconv.Atoi(matches[1])
+			if err != nil {
+				continue
+			}
+			if num > maxNum {
+				maxNum = num
+			}
+		}
+	}
+
+	return maxNum, nil
+}
+
+func CreateMigrationFiles(dir, baseName string, includeHelp bool) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	upContent := fmt.Sprintf("# %s.up.sql\n", baseName)
+	if includeHelp {
+		upContent += MiniHelp + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, baseName+".up.sql"), []byte(upContent), 0644); err != nil {
+		return err
+	}
+
+	downContent := fmt.Sprintf("# %s.down.sql\n", baseName)
+	if includeHelp {
+		downContent += MiniHelp + "\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, baseName+".down.sql"), []byte(downContent), 0644); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func collect() {
