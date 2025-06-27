@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -42,10 +43,11 @@ const (
 ## roam-sql -i|--info for syntax help`
 	MigrationDir = "./migrations"
 	IncludeHelp  = true
+	DescribePath = "scripts/describe.sh"
 )
 
 func main() {
-
+	//should catch if wrong flag or wrong argument, because now it just calls an error
 	var (
 		helpFlag bool
 		// verboseFlag bool
@@ -120,7 +122,24 @@ func noColor() {
 
 func describe(arg string) (string, error) {
 	// should rewrite it to work on both windows and linux
-	cmd := exec.Command("scripts/describe.sh", arg)
+	var cmd *exec.Cmd
+	if _, err := os.Stat(DescribePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("script not found at %s", DescribePath)
+	}
+	if runtime.GOOS == "windows" {
+		gitBashPath := "C:\\Program Files\\Git\\bin\\bash.exe"
+		if _, err := os.Stat(gitBashPath); err == nil {
+			cmd = exec.Command(gitBashPath, "-c", fmt.Sprintf("./%s %s", DescribePath, arg))
+		} else if path, err := exec.LookPath("wsl.exe"); err == nil {
+			//should check if wsl works
+			cmd = exec.Command(path, "bash", "-c", fmt.Sprintf("./%s %s", strings.ReplaceAll(DescribePath, "\\", "/"), arg))
+		} else {
+			return "", fmt.Errorf("bash not found on Windows")
+		}
+	} else {
+		cmd = exec.Command("bin/bash", DescribePath, arg)
+	}
+
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to run describe %s: %v", arg, err)
