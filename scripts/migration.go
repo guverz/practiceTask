@@ -130,9 +130,9 @@ func describe(arg string) (string, error) {
 		gitBashPath := "C:\\Program Files\\Git\\bin\\bash.exe"
 		if _, err := os.Stat(gitBashPath); err == nil {
 			cmd = exec.Command(gitBashPath, "-c", fmt.Sprintf("./%s %s", DescribePath, arg))
-		} else if path, err := exec.LookPath("wsl.exe"); err == nil {
-			//should check if wsl works
-			cmd = exec.Command(path, "bash", "-c", fmt.Sprintf("./%s %s", strings.ReplaceAll(DescribePath, "\\", "/"), arg))
+			// } else if path, err := exec.LookPath("wsl.exe"); err == nil {
+			// 	//should check if wsl works
+			// 	cmd = exec.Command(path, "bash", "-c", fmt.Sprintf("./%s %s", strings.ReplaceAll(DescribePath, "\\", "/"), arg))
 		} else {
 			return "", fmt.Errorf("bash not found on Windows")
 		}
