@@ -244,9 +244,9 @@ function migration_add {
 ########################################################################################################################
 function migration_list() {
     # decomposition make this function project_migrations
-    project=$(scripts/describe project)
-    version=$(scripts/describe version)
-    release=$(scripts/describe release)
+    project=$(scripts/describe.sh project)
+    version=$(scripts/describe.sh version)
+    release=$(scripts/describe.sh release)
 
     # declare map key is md5 of original migration script, value is meta
     declare -gA project_migrations
@@ -427,9 +427,9 @@ function migration_list() {
         if [[ -d  "${submodule}/${MIGRATION_DIR}" ]]; then
             local submodule_project
             if [[ -e ${submodule}/describe ]]; then
-                submodule_project=$(cd ${submodule} && ./describe project)
+                submodule_project=$(cd ${submodule} && ./describe.sh project)
             elif [[ -e ${submodule}/scripts/describe ]]; then
-                submodule_project=$(cd ${submodule} && ./scripts/describe project)
+                submodule_project=$(cd ${submodule} && ./scripts/describe.sh project)
             else
                 le "submodule ${submodule} has no describe script"
                 continue
@@ -478,7 +478,7 @@ function migration_list() {
 # migration collect
 
 function migration_collect() {
-
+    # local start_time=$(date +%s%3N)
     local collected=0
     migration_list
     if [[ ${missed_files} -gt 0 ]]; then
@@ -645,6 +645,11 @@ function migration_collect() {
 
     migration_validation
 
+
+    # local end_time=$(date +%s%3N)
+    # local elapsed=$((end_time - start_time))
+    # lg "Время выполнения: ${elapsed} мс"
+
     if [[ ${collected} -gt 0 ]]; then
         lg "${green}[ok]${clre} collected ${collected} file(s)"
     else
@@ -657,6 +662,7 @@ function migration_collect() {
 # migration check
 
 function migration_check() {
+    # local start_time=$(date +%s%3N)
     migration_list
     if [[ ${missed_files} -gt 0 ]]; then
         le "there is unregistered migration files pairs (${missed_files}), collect them and commit:"
@@ -668,6 +674,9 @@ function migration_check() {
         exit 1
     fi
     migration_validation
+    # local end_time=$(date +%s%3N)
+    # local elapsed=$((end_time - start_time))
+    # lg "Время выполнения: ${elapsed} мс"
     exit 0
 }
 
