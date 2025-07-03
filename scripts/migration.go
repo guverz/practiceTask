@@ -27,13 +27,23 @@ commands:
         add            add new migrations script with properly defined name
         collect        collect migrations on submodules between commits into migrations catalog
         check          check unregtistered migrations files at submodules`
-	MiniHelpDir  = "scripts/migration.template.sql"
-	MigrationDir = "./migrations"
-	IncludeHelp  = true
-	DescribePath = "scripts/describe.sh"
-	GitBashPath  = "C:\\Program Files\\Git\\bin\\bash.exe"
-	Shell        = "bin/bash"
+	MiniHelpDir      = "scripts/migration.template.sql"
+	MigrationDir     = "./migrations"
+	IncludeHelp      = true
+	MainDescribePath = "scripts/describe.sh"
+	GitBashPath      = "C:\\Program Files\\Git\\bin\\bash.exe"
+	Shell            = "bin/bash"
 )
+
+type metaInfo struct {
+	Project  string
+	Version  string
+	Release  string
+	MD5      string
+	Path     string
+	Type     string // "up" || "down"
+	BaseName string // no .up.sql || .down.sql
+}
 
 func main() {
 
@@ -107,20 +117,20 @@ func version() {
 	fmt.Println(Version)
 }
 
-func describe(arg string) (string, error) {
+func describe(scriptPath, arg string) (string, error) {
 	// should think of implementing wsl use for windows
 	var cmd *exec.Cmd
-	if _, err := os.Stat(DescribePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("script not found at %s", DescribePath)
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("script not found at %s", scriptPath)
 	}
 	if runtime.GOOS == "windows" {
 		if _, err := os.Stat(GitBashPath); err == nil {
-			cmd = exec.Command(GitBashPath, "-c", fmt.Sprintf("./%s %s", DescribePath, arg))
+			cmd = exec.Command(GitBashPath, "-c", fmt.Sprintf("./%s %s", scriptPath, arg))
 		} else {
 			return "", fmt.Errorf("bash not found on Windows")
 		}
 	} else {
-		cmd = exec.Command(Shell, DescribePath, arg)
+		cmd = exec.Command(Shell, scriptPath, arg)
 	}
 
 	output, err := cmd.Output()
@@ -131,15 +141,15 @@ func describe(arg string) (string, error) {
 }
 
 func add() error {
-	project, err := describe("project")
+	project, err := describe(MainDescribePath, "project")
 	if err != nil {
 		log.Fatal(err)
 	}
-	version, err := describe("version")
+	version, err := describe(MainDescribePath, "version")
 	if err != nil {
 		log.Fatal(err)
 	}
-	release, err := describe("release")
+	release, err := describe(MainDescribePath, "release")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -218,12 +228,48 @@ func CreateMigrationFiles(dir, baseName string, includeHelp bool) error {
 	return nil
 }
 
-func collect() {
-	mainUp, mainDown, err := findMigrationFiles(MigrationDir)
+// fill-in metaInfo
+func getMigrationMetaMap(dir string, describePath string) (map[string]metaInfo, error) {
+	m := make(map[string]metaInfo)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		fmt.Println("Error finding migration files:", err)
-		os.Exit(1)
+		if os.IsNotExist(err) {
+			return m, nil
+		}
+		return nil, err
 	}
+	project, _ := describe(describePath, "project")
+	version, _ := describe(describePath, "version")
+	release, _ := describe(describePath, "release")
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".up.sql") || strings.HasSuffix(name, ".down.sql") {
+			path := filepath.Join(dir, name)
+			_, md5 := parseMigrationMeta(path)
+			typeStr := "up"
+			if strings.HasSuffix(name, ".down.sql") {
+				typeStr = "down"
+			}
+			base := strings.TrimSuffix(strings.TrimSuffix(name, ".up.sql"), ".down.sql")
+			m[base+"|"+typeStr] = metaInfo{
+				Project:  project,
+				Version:  version,
+				Release:  release,
+				MD5:      md5,
+				Path:     path,
+				Type:     typeStr,
+				BaseName: base,
+			}
+		}
+	}
+	return m, nil
+}
+
+func collect() {
+	mainMap, _ := getMigrationMetaMap(MigrationDir, MainDescribePath)
 
 	submodules, err := getSubmodules()
 	if err != nil {
@@ -231,42 +277,57 @@ func collect() {
 		os.Exit(1)
 	}
 
-	collected := 0
+	totalAdded, totalUpdated, totalDeleted := 0, 0, 0
+	// gathering all migration-files from submodules
+	subMap := make(map[string]metaInfo)
 	for _, sub := range submodules {
+		describeScript, _ := findDescribeScript(sub)
 		subMigDir := filepath.Join(sub, "migrations")
-		subUp, subDown, _ := findMigrationFiles(subMigDir)
-		for key, upPath := range subUp {
-			if _, ok := mainUp[key]; !ok {
-				// copy up
-				targetUp := filepath.Join(MigrationDir, key+".up.sql")
-				if err := copyFileWithMeta(upPath, targetUp, upPath); err != nil {
-					fmt.Println("Error copying file with meta:", err)
-					continue
-				}
-				collected++
-				// copying include-files
-				copyIncludes(upPath, filepath.Dir(targetUp))
-			}
-		}
-		for key, downPath := range subDown {
-			if _, ok := mainDown[key]; !ok {
-				targetDown := filepath.Join(MigrationDir, key+".down.sql")
-				if err := copyFileWithMeta(downPath, targetDown, downPath); err != nil {
-					fmt.Println("Error copying file with meta:", err)
-					continue
-				}
-				collected++
-				copyIncludes(downPath, filepath.Dir(targetDown))
-			}
+		m, _ := getMigrationMetaMap(subMigDir, describeScript)
+		for k, v := range m {
+			subMap[sub+"|"+k] = v
 		}
 	}
 
-	if collected > 0 {
-		fmt.Printf("[ok] collected %d file(s)\n", collected)
-	} else {
-		fmt.Println("[ok] nothing to collect")
+	//  add new and update changed
+	for _, v := range subMap {
+		// creating name
+		baseName := fmt.Sprintf("%s-%s-%s-%s", v.Project, v.Version, v.Release, v.BaseName)
+		fileName := baseName + "." + v.Type + ".sql"
+		mainPath := filepath.Join(MigrationDir, fileName)
+		mainKey := v.BaseName + "|" + v.Type
+		mainMeta, exists := mainMap[mainKey]
+		if !exists {
+			// new file
+			copyFileWithMeta(v.Path, mainPath, v.Path)
+			copyIncludes(v.Path, filepath.Dir(mainPath))
+			fmt.Printf("[add] %s\n", fileName)
+			totalAdded++
+		} else if mainMeta.MD5 != v.MD5 && v.MD5 != "" {
+			// update file
+			copyFileWithMeta(v.Path, mainPath, v.Path)
+			copyIncludes(v.Path, filepath.Dir(mainPath))
+			fmt.Printf("[update] %s\n", fileName)
+			totalUpdated++
+		}
 	}
-	// fmt.Printf("Время выполнения collect: %v\n", time.Since(t0))
+
+	// delete missing
+	// gathering all keys from subMap for search
+	subKeys := make(map[string]struct{})
+	for _, v := range subMap {
+		key := v.BaseName + "|" + v.Type
+		subKeys[key] = struct{}{}
+	}
+	for k, v := range mainMap {
+		if _, ok := subKeys[k]; !ok {
+			os.Remove(v.Path)
+			fmt.Printf("[delete] %s\n", filepath.Base(v.Path))
+			totalDeleted++
+		}
+	}
+
+	fmt.Printf("[ok] collected: added %d, updated %d, deleted %d file(s)\n", totalAdded, totalUpdated, totalDeleted)
 	// validation after collecting
 	check()
 }
