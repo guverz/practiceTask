@@ -31,6 +31,8 @@ commands:
 	MigrationDir = "./migrations"
 	IncludeHelp  = true
 	DescribePath = "scripts/describe.sh"
+	GitBashPath  = "C:\\Program Files\\Git\\bin\\bash.exe"
+	Shell        = "bin/bash"
 )
 
 func main() {
@@ -96,7 +98,6 @@ func minihelp() string {
 	text, err := os.ReadFile(MiniHelpDir)
 	if err != nil {
 		fmt.Println("Error reading help file:", err)
-		os.Exit(1)
 	}
 	return string(text)
 }
@@ -113,14 +114,13 @@ func describe(arg string) (string, error) {
 		return "", fmt.Errorf("script not found at %s", DescribePath)
 	}
 	if runtime.GOOS == "windows" {
-		gitBashPath := "C:\\Program Files\\Git\\bin\\bash.exe"
-		if _, err := os.Stat(gitBashPath); err == nil {
-			cmd = exec.Command(gitBashPath, "-c", fmt.Sprintf("./%s %s", DescribePath, arg))
+		if _, err := os.Stat(GitBashPath); err == nil {
+			cmd = exec.Command(GitBashPath, "-c", fmt.Sprintf("./%s %s", DescribePath, arg))
 		} else {
 			return "", fmt.Errorf("bash not found on Windows")
 		}
 	} else {
-		cmd = exec.Command("bin/bash", DescribePath, arg)
+		cmd = exec.Command(Shell, DescribePath, arg)
 	}
 
 	output, err := cmd.Output()
@@ -195,7 +195,6 @@ func FindLastMigrationNumber(dir, baseName string) (int, error) {
 }
 
 func CreateMigrationFiles(dir, baseName string, includeHelp bool) error {
-	// doesn't work check if there is a MigrationDir, have to create it myself or have it already
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -220,7 +219,6 @@ func CreateMigrationFiles(dir, baseName string, includeHelp bool) error {
 }
 
 func collect() {
-	// t0 := time.Now()
 	mainUp, mainDown, err := findMigrationFiles(MigrationDir)
 	if err != nil {
 		fmt.Println("Error finding migration files:", err)
@@ -353,10 +351,24 @@ func check() {
 			if _, ok := mainUp[key]; !ok {
 				missed = append(missed, upPath)
 			}
+			if mainPath, ok := mainUp[key]; ok {
+				_, mainMD5 := parseMigrationMeta(mainPath)
+				_, subMD5 := parseMigrationMeta(upPath)
+				if mainMD5 != "" && subMD5 != "" && mainMD5 != subMD5 {
+					errCh <- fmt.Sprintf("ERROR: migration meta mismatch for %s: main md5=%s, submodule md5=%s", key+".up.sql", mainMD5, subMD5)
+				}
+			}
 		}
 		for key, downPath := range subDown {
 			if _, ok := mainDown[key]; !ok {
 				missed = append(missed, downPath)
+			}
+			if mainPath, ok := mainDown[key]; ok {
+				_, mainMD5 := parseMigrationMeta(mainPath)
+				_, subMD5 := parseMigrationMeta(downPath)
+				if mainMD5 != "" && subMD5 != "" && mainMD5 != subMD5 {
+					errCh <- fmt.Sprintf("ERROR: migration meta mismatch for %s: main md5=%s, submodule md5=%s", key+".down.sql", mainMD5, subMD5)
+				}
 			}
 		}
 	}
@@ -530,6 +542,9 @@ func findDescribeScript(submodulePath string) (string, error) {
 func validateMigrationFilenames(dir string) ([]string, int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if os.IsNotExist((err)) {
+			return nil, 0
+		}
 		return []string{fmt.Sprintf("ERROR: failed to read dir %s: %v", dir, err)}, 0
 	}
 	var errs []string
@@ -569,12 +584,12 @@ func findIncludes(filePath string, visited map[string]struct{}) ([]string, error
 			inc = strings.TrimSpace(inc)
 			if inc != "" {
 				if !strings.HasSuffix(inc, ".sql") {
-					fmt.Printf("ERROR:   wrong include @%s\n", inc)
+					fmt.Printf("ERROR:   wrong include @%s in %s\n", inc, filePath)
 					continue
 				}
 				incPath := filepath.Join(filepath.Dir(filePath), inc)
 				if _, err := os.Stat(incPath); os.IsNotExist(err) {
-					fmt.Printf("ERROR:   wrong include @%s\n", inc)
+					fmt.Printf("ERROR:   wrong include @%s in %s\n", inc, filePath)
 					continue
 				}
 				includes = append(includes, inc)
@@ -584,4 +599,25 @@ func findIncludes(filePath string, visited map[string]struct{}) ([]string, error
 		}
 	}
 	return includes, nil
+}
+
+func parseMigrationMeta(filePath string) (string, string) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", ""
+	}
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "#migration:") {
+			parts := strings.SplitN(strings.TrimSpace(line), ":", 2)
+			if len(parts) == 2 {
+				meta := strings.TrimSpace(parts[1])
+				metaParts := strings.Split(meta, ";")
+				if len(metaParts) == 2 {
+					return metaParts[0], metaParts[1]
+				}
+			}
+		}
+	}
+	return "", ""
 }
