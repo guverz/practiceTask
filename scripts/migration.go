@@ -42,7 +42,7 @@ type metaInfo struct {
 	MD5      string
 	Path     string
 	Type     string // "up" || "down"
-	BaseName string // no .up.sql || .down.sql
+	BaseName string // without .up.sql/.down.sql
 }
 
 func main() {
@@ -228,7 +228,7 @@ func CreateMigrationFiles(dir, baseName string, includeHelp bool) error {
 	return nil
 }
 
-// fill-in metaInfo
+// fill in metaInfo
 func getMigrationMetaMap(dir string, describePath string) (map[string]metaInfo, error) {
 	m := make(map[string]metaInfo)
 	entries, err := os.ReadDir(dir)
@@ -280,8 +280,14 @@ func collect() {
 	totalAdded, totalUpdated, totalDeleted := 0, 0, 0
 	// gathering all migration-files from submodules
 	subMap := make(map[string]metaInfo)
+	describeErrors := []string{}
+
 	for _, sub := range submodules {
-		describeScript, _ := findDescribeScript(sub)
+		describeScript, err := findDescribeScript(sub)
+		if err != nil {
+			describeErrors = append(describeErrors, fmt.Sprintf("ERROR: submodule %s has no describe script", sub))
+			continue
+		}
 		subMigDir := filepath.Join(sub, "migrations")
 		m, _ := getMigrationMetaMap(subMigDir, describeScript)
 		for k, v := range m {
@@ -289,7 +295,18 @@ func collect() {
 		}
 	}
 
-	//  add new and update changed
+	if len(describeErrors) > 0 {
+		for _, e := range describeErrors {
+			fmt.Println(e)
+		}
+	}
+
+	if len(subMap) == 0 {
+		fmt.Println("[ok] nothing to collect")
+		return
+	}
+
+	// add new and update changed
 	for _, v := range subMap {
 		// creating name
 		baseName := fmt.Sprintf("%s-%s-%s-%s", v.Project, v.Version, v.Release, v.BaseName)
@@ -328,7 +345,6 @@ func collect() {
 	}
 
 	fmt.Printf("[ok] collected: added %d, updated %d, deleted %d file(s)\n", totalAdded, totalUpdated, totalDeleted)
-	// validation after collecting
 	check()
 }
 
@@ -374,8 +390,23 @@ func copyIncludes(sqlFile, targetDir string) {
 }
 
 func check() {
-	// t0 := time.Now()
 	var errors []string
+	submodules, err := getSubmodules()
+	if err != nil {
+		fmt.Println("Error getting submodules:", err)
+		os.Exit(1)
+	}
+	describeErrors := []string{}
+	for _, sub := range submodules {
+		if _, err := findDescribeScript(sub); err != nil {
+			describeErrors = append(describeErrors, fmt.Sprintf("ERROR: submodule %s has no describe script", sub))
+		}
+	}
+	if len(describeErrors) > 0 {
+		for _, e := range describeErrors {
+			fmt.Println(e)
+		}
+	}
 	errCh := make(chan string, 10000)
 	wrongFiles := 0
 
@@ -391,15 +422,8 @@ func check() {
 	}
 
 	// submodules
-	submodules, err := getSubmodules()
-	if err != nil {
-		errCh <- fmt.Sprintf("Error getting submodules: %v", err)
-	}
 	missed := []string{}
 	for _, sub := range submodules {
-		if _, err := findDescribeScript(sub); err != nil {
-			errCh <- fmt.Sprintf("ERROR: %v", err)
-		}
 		subMigDir := filepath.Join(sub, "migrations")
 		errs, wrong := validateMigrationFilenames(subMigDir)
 		for _, e := range errs {
@@ -434,7 +458,7 @@ func check() {
 		}
 	}
 
-	// check having a piar up - down.sql
+	// check having a pair up - down.sql
 	wrongPairs := make([]string, 0, len(mainUp)+len(mainDown))
 	pairWg := sync.WaitGroup{}
 	pairCh := make(chan string, len(mainUp)+len(mainDown))
@@ -513,7 +537,6 @@ func check() {
 		for _, e := range errors {
 			fmt.Println(e)
 		}
-		// fmt.Printf("Время выполнения check: %v\n", time.Since(t0))
 		os.Exit(1)
 	}
 	if len(missed) > 0 {
@@ -522,7 +545,6 @@ func check() {
 			fmt.Println("  ", m)
 		}
 		fmt.Println("use: scripts/migration.go collect")
-		// fmt.Printf("Время выполнения check: %v\n", time.Since(t0))
 		os.Exit(1)
 	}
 	if len(wrongPairs) > 0 {
@@ -530,7 +552,6 @@ func check() {
 		for _, w := range wrongPairs {
 			fmt.Println("  ", w)
 		}
-		// fmt.Printf("Время выполнения check: %v\n", time.Since(t0))
 		os.Exit(1)
 	}
 	if len(missingIncludes) > 0 {
@@ -538,11 +559,9 @@ func check() {
 		for _, inc := range missingIncludes {
 			fmt.Println("  ", inc)
 		}
-		// fmt.Printf("Время выполнения check: %v\n", time.Since(t0))
 		os.Exit(1)
 	}
 	fmt.Println("[ok] Migrations are correct. No unregistered found.")
-	// fmt.Printf("Время выполнения check: %v\n", time.Since(t0))
 }
 
 func getSubmodules() ([]string, error) {
